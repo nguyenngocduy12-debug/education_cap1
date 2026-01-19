@@ -3,6 +3,72 @@ const router = express.Router();
 const Quiz = require('../models/Quiz.model');
 const QuizResult = require('../models/QuizResult.model');
 const { authMiddleware, requireRole } = require('../middleware/auth.middleware');
+const { upload, extractTextFromFile, deleteFile } = require('../middleware/upload.middleware');
+const { generateQuizFromDocument } = require('../services/ai.service');
+
+// @route   POST /api/quiz/generate-from-document
+// @desc    Upload document and generate quiz questions
+// @access  Private (Teacher only)
+router.post('/generate-from-document', authMiddleware, requireRole('teacher'), upload.single('document'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng upload file tài liệu'
+      });
+    }
+
+    const { numberOfQuestions = 10, difficulty = 'medium' } = req.body;
+
+    // Extract text from uploaded file
+    console.log('📄 Extracting text from file:', req.file.originalname);
+    const documentText = await extractTextFromFile(req.file.path);
+
+    if (!documentText || documentText.trim().length < 100) {
+      await deleteFile(req.file.path);
+      return res.status(400).json({
+        success: false,
+        message: 'File tài liệu không chứa đủ nội dung để tạo câu hỏi'
+      });
+    }
+
+    console.log('🤖 Generating quiz with Gemini AI...');
+    // Generate quiz questions using Gemini AI
+    const quizData = await generateQuizFromDocument({
+      documentText: documentText.substring(0, 15000), // Limit to avoid token limits
+      numberOfQuestions: parseInt(numberOfQuestions),
+      difficulty
+    });
+
+    // Delete uploaded file after processing
+    await deleteFile(req.file.path);
+
+    res.json({
+      success: true,
+      message: 'Tạo câu hỏi thành công',
+      data: {
+        fileName: req.file.originalname,
+        fileSize: req.file.size,
+        questions: quizData.questions,
+        totalQuestions: quizData.totalQuestions,
+        difficulty: quizData.difficulty,
+        note: quizData.note
+      }
+    });
+
+  } catch (error) {
+    // Clean up file on error
+    if (req.file) {
+      await deleteFile(req.file.path);
+    }
+
+    console.error('❌ Error generating quiz from document:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
 
 // @route   POST /api/quiz/create
 // @desc    Create a new quiz

@@ -7,6 +7,7 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import SlideGenerator from './pages/SlideGenerator'
 import SlideList from './pages/SlideList'
+import QuizGenerator from './pages/QuizGenerator'
 import { QuizCreate, QuizList, QuizTake, QuizReview } from './pages/QuizCreate'
 import { LivestreamList, LivestreamRoom } from './pages/LivestreamList'
 import Layout from './components/Layout'
@@ -53,6 +54,11 @@ function App() {
         {/* Quiz Routes */}
         <Route path="quiz">
           <Route index element={<QuizList />} />
+          <Route path="generate" element={
+            <ProtectedRoute requiredRole="teacher">
+              <QuizGenerator />
+            </ProtectedRoute>
+          } />
           <Route path="create" element={
             <ProtectedRoute requiredRole="teacher">
               <QuizCreate />

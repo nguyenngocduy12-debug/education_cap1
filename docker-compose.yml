@@ -1,0 +1,122 @@
+services:
+  # MongoDB Primary (Master)
+  mongo-primary:
+    image: mongo:7.0
+    container_name: mongo_primary
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--port", "27017", "--keyFile", "/data/keyfile/mongodb-keyfile"]
+    ports:
+      - "27117:27017"
+    volumes:
+      - mongo-primary-data:/data/db
+      - ./scripts/init-replica.sh:/scripts/init-replica.sh
+      - ./mongodb-keyfile:/data/keyfile/mongodb-keyfile:ro
+    networks:
+      - education-network
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo-primary:27017',priority:2},{_id:1,host:'mongo-secondary:27017',priority:1},{_id:2,host:'mongo-arbiter:27017',arbiterOnly:true}]}) }" | mongosh --port 27017 --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # MongoDB Secondary (Slave)
+  mongo-secondary:
+    image: mongo:7.0
+    container_name: mongo_secondary
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--port", "27017", "--keyFile", "/data/keyfile/mongodb-keyfile"]
+    ports:
+      - "27118:27017"
+    volumes:
+      - mongo-secondary-data:/data/db
+      - ./mongodb-keyfile:/data/keyfile/mongodb-keyfile:ro
+    networks:
+      - education-network
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+
+  # MongoDB Arbiter (Voting node)
+  mongo-arbiter:
+    image: mongo:7.0
+    container_name: mongo_arbiter
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--port", "27017", "--keyFile", "/data/keyfile/mongodb-keyfile"]
+    ports:
+      - "27119:27017"
+    volumes:
+      - mongo-arbiter-data:/data/db
+      - ./mongodb-keyfile:/data/keyfile/mongodb-keyfile:ro
+    networks:
+      - education-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    networks:
+      - education-network
+    volumes:
+      - redis-data:/data
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: education_backend
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      MONGO_URI: mongodb://admin:admin123@mongo-primary:27017,mongo-secondary:27017/education_db?replicaSet=rs0&authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      AI_API_KEY: ${AI_API_KEY}
+      AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1}
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    networks:
+      - education-network
+    depends_on:
+      - mongo-primary
+      - mongo-secondary
+      - mongo-arbiter
+      - redis
+    restart: unless-stopped
+
+  # Frontend React
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: education_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:5000
+      REACT_APP_WS_URL: ws://localhost:5000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - education-network
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true
+
+networks:
+  education-network:
+    driver: bridge
+
+volumes:
+  mongo-primary-data:
+  mongo-secondary-data:
+  mongo-arbiter-data:
+  redis-data:
